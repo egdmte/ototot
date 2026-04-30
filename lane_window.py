@@ -23,6 +23,7 @@ from config import (
     USE_MANUAL_HSV, MANUAL_HSV_LOW, MANUAL_HSV_HIGH,
     WHITE_HSV_LOW, WHITE_HSV_HIGH,
     LANE_WINDOW_CENTER_RATIO, LANE_WINDOW_SIDE_RATIO,
+    ASSUMED_LANE_WIDTH,
 )
 try:
     from config import LANE_WINDOW_USE_PERSPECTIVE
@@ -93,6 +94,9 @@ class LaneWindowDetector:
         # Hafiza (serit kayboldugunda)
         self.prev_left:  int | None = None
         self.prev_right: int | None = None
+
+        # Dinamik serit genisligi tahmini (EMA)
+        self._last_lane_width: int = ASSUMED_LANE_WIDTH
 
         # EMA error smoothing (yalpa onleme)
         self._ema_error: float | None = None
@@ -165,14 +169,20 @@ class LaneWindowDetector:
             else:                   right_x = self.prev_right
 
         # lane_center hesapla
+        # Dinamik serit genisligi: iki peak arasinda gercek mesafeyi izle
         if left_x is not None and right_x is not None:
+            measured_width = right_x - left_x
+            if measured_width > LANE_MIN_WIDTH:
+                self._last_lane_width = int(
+                    0.85 * self._last_lane_width + 0.15 * measured_width
+                )
             lane_center = (left_x + right_x) // 2
         elif left_x is not None:
-            # Sag yok -> tahmini 200 px sagda
-            lane_center = left_x + 150
+            # Sag yok -> bilinen serit genisliginin yarisi kadar saga
+            lane_center = left_x + self._last_lane_width // 2
         elif right_x is not None:
-            # Sol yok -> tahmini 200 px solda
-            lane_center = right_x - 150
+            # Sol yok -> bilinen serit genisliginin yarisi kadar sola
+            lane_center = right_x - self._last_lane_width // 2
         else:
             lane_center = None
 
@@ -182,9 +192,9 @@ class LaneWindowDetector:
         if far_left_x is not None and far_right_x is not None:
             far_lane_center = (far_left_x + far_right_x) // 2
         elif far_left_x is not None:
-            far_lane_center = far_left_x + 150
+            far_lane_center = far_left_x + self._last_lane_width // 2
         elif far_right_x is not None:
-            far_lane_center = far_right_x - 150
+            far_lane_center = far_right_x - self._last_lane_width // 2
         else:
             far_lane_center = None
 
@@ -247,18 +257,28 @@ class LaneWindowDetector:
 
         FIX: Frame kenarlarindaki gurultu/border pixel'leri reddet.
         FIX: PEAK_MIN_HEIGHT yuksek — sadece GERCEK serit cizgileri gecer.
+        FIX: argmax yerine agirlikli centroid — cizginin tam merkezini bul.
         """
         n = len(hist)
         mid = n // 2
         edge = int(n * EDGE_IGNORE_RATIO)  # her iki kenardan ignore edilecek px
 
-        # Sol yari: edge..mid arasinda ara (en sol kenar = noise/border)
+        # Sol yari: edge..mid arasinda ara
         left_h  = hist[edge:mid].copy() if mid > edge else np.zeros(0)
-        # Sag yari: mid..(n-edge) arasinda ara (en sag kenar = noise/border)
+        # Sag yari: mid..(n-edge) arasinda ara
         right_h = hist[mid:n-edge].copy() if (n - edge) > mid else np.zeros(0)
 
-        left_x  = (int(np.argmax(left_h))  + edge) if left_h.size  and left_h.max()  > PEAK_MIN_HEIGHT else None
-        right_x = (int(np.argmax(right_h)) + mid)  if right_h.size and right_h.max() > PEAK_MIN_HEIGHT else None
+        # Agirlikli centroid: argmax yerine cizginin gercek merkezini bul
+        def _centroid(segment, offset):
+            if segment.size == 0 or segment.max() <= PEAK_MIN_HEIGHT:
+                return None
+            total = float(segment.sum())
+            if total < PEAK_MIN_HEIGHT:
+                return None
+            return int(np.average(np.arange(len(segment)), weights=segment) + offset)
+
+        left_x  = _centroid(left_h,  edge)
+        right_x = _centroid(right_h, mid)
 
         # Cok yakin tepeler tek serittir -> zayif olani at
         if left_x is not None and right_x is not None:
@@ -315,7 +335,7 @@ class LaneWindowDetector:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8,
                     (0, 255, 0) if zone == "ORTA" else (0, 165, 255), 2)
         cv2.putText(debug,
-                    f"side={int(self.side_ratio*100)}% | center={int(self.center_ratio*100)}%",
+                    f"side={int(self.side_ratio*100)}% | center={int(self.center_ratio*100)}% | W:{self._last_lane_width}px",
                     (10, 55),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
         persp_str = "PERSP:ON" if self.use_perspective else "PERSP:OFF"
