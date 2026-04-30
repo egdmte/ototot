@@ -110,8 +110,9 @@ class PDController:
 
         if self.lost_frames > _LOST_FRAMES_STOP:
             speed = 0.0
-            self.integral = 0.0   # tam durunca biriken bias'ı temizle
+            self.integral        = 0.0   # tam durunca biriken bias'ı temizle
             self.prev_correction = 0.0
+            self.prev_error      = 0.0   # eski hata yönüyle hamle yapmasın
 
         # Watchdog/dış hız çarpanı (FPS düşük/lane lost gibi durumlar)
         speed *= float(np.clip(self.speed_multiplier, 0.0, 1.0))
@@ -123,9 +124,9 @@ class PDController:
         # Ölü Bölge Telafisi: common-mode'u kaldır, diferansiyeli koru
         left, right = self._apply_dead_zone_pair(left_raw, right_raw)
 
-        # Hız profiline göre trim seçimi
-        left = self._apply_speed_dependent_trim(left)
-        right = self._apply_speed_dependent_trim(right)
+        # Hız profiline göre trim seçimi (sol/sağ ayrı trim profilleri)
+        left = self._apply_speed_dependent_trim(left, side='left')
+        right = self._apply_speed_dependent_trim(right, side='right')
 
         self.prev_error = error
         self.prev_time  = now
@@ -174,32 +175,30 @@ class PDController:
                 float(np.clip(right_out, -MAX_SPEED, MAX_SPEED)))
 
     # ------------------------------------------------------------------
-    def _apply_speed_dependent_trim(self, pwm: float) -> float:
-        """Hız profiline göre LEFT/RIGHT trim seçimi."""
+    def _apply_speed_dependent_trim(self, pwm: float, side: str = 'left') -> float:
+        """Hız profiline göre sol veya sağ trim seçimi."""
         abs_pwm = abs(pwm)
-        
-        if abs_pwm < 40:
-            # Düşük hız profili
-            trim = LEFT_TRIM_LOW if pwm >= 0 else RIGHT_TRIM_LOW
-        elif abs_pwm > 70:
-            # Yüksek hız profili
-            trim = LEFT_TRIM_HIGH if pwm >= 0 else RIGHT_TRIM_HIGH
+        if side == 'left':
+            trim_low, trim_high = LEFT_TRIM_LOW, LEFT_TRIM_HIGH
         else:
-            # Lineer interpolasyon
+            trim_low, trim_high = RIGHT_TRIM_LOW, RIGHT_TRIM_HIGH
+
+        if abs_pwm < 40:
+            trim = trim_low
+        elif abs_pwm > 70:
+            trim = trim_high
+        else:
             ratio = (abs_pwm - 40) / 30.0
-            if pwm >= 0:
-                trim = LEFT_TRIM_LOW + ratio * (LEFT_TRIM_HIGH - LEFT_TRIM_LOW)
-            else:
-                trim = RIGHT_TRIM_LOW + ratio * (RIGHT_TRIM_HIGH - RIGHT_TRIM_LOW)
-        
+            trim = trim_low + ratio * (trim_high - trim_low)
+
         return pwm * trim
 
     # ------------------------------------------------------------------
     def reset(self) -> None:
         """İç durumu sıfırla (örn. bir duraklamadan sonra)."""
-        self.prev_error      = 0.0
-        self.prev_time       = time.time()
-        self.lost_frames     = 0
-        self.integral        = 0.0
-        self.prev_correction = 0.0
+        self.prev_error       = 0.0
+        self.prev_time        = time.time()
+        self.lost_frames      = 0
+        self.integral         = 0.0
+        self.prev_correction  = 0.0
         self.speed_multiplier = 1.0

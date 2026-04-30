@@ -283,7 +283,9 @@ class LaneWindowDetector:
         # Cok yakin tepeler tek serittir -> zayif olani at
         if left_x is not None and right_x is not None:
             if right_x - left_x < LANE_MIN_WIDTH:
-                if hist[left_x] >= hist[right_x]: right_x = None
+                lx_safe = int(np.clip(left_x,  0, n - 1))
+                rx_safe = int(np.clip(right_x, 0, n - 1))
+                if hist[lx_safe] >= hist[rx_safe]: right_x = None
                 else:                              left_x  = None
 
         return left_x, right_x

@@ -493,18 +493,14 @@ def drive_loop() -> None:
                 print("[main] 🚦 YEŞİL IŞIK ALGILANDI — HAREKET! (Kural 3.4.1)")
 
         elif _state == 'SURUYOR':
-            sign = events.get('sign_type')
+            sign_blue = events.get('sign_blue', False)
 
             # Tabela tepkileri — yol tespitinden önce kontrol edilir
-            if sign == 'cikmazsokak':
-                _state = 'CIKMAZSOKAK'
-                motor.brake()
-                print("[main] 🚫 ÇIKMAZ SOKAK tabelası — araç durdu")
-            elif sign == 'sollamabam':
+            if sign_blue:
                 _no_overtake_until = now + _NO_OVERTAKE_SEC
-                print(f"[main] ⛔ SOLLAMA YASAĞI — {_NO_OVERTAKE_SEC:.0f}s geçerli")
+                print(f"[main] ⛔ MAVİ LEVHA (sollama yasağı) — {_NO_OVERTAKE_SEC:.0f}s geçerli")
 
-            if events['crosswalk']:
+            elif events['crosswalk']:
                 if events['crosswalk_close']:
                     _state = 'YAYA_GECİDİ'
                     _state_timer = now
@@ -713,7 +709,7 @@ def drive_loop() -> None:
                             print(f"   USE_MANUAL_HSV = True")
                             print(f"   MANUAL_HSV_LOW = {_hsv_calib_low}")
                             print(f"   MANUAL_HSV_HIGH = {_hsv_calib_high}")
-                            print("[kalibrasyon] Yeniden baslatmaniz gerekmez, degerler anlik aktif!")
+                            print("[kalibrasyon] Degisiklik kaydedildi — yeni degerler icin programi yeniden baslatiniz.")
                         except Exception as e:
                             print(f"[kalibrasyon] Kaydetme hatasi: {e}")
                     else:
